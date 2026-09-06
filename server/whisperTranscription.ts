@@ -29,7 +29,9 @@ export async function transcribeAudio(options: TranscribeBytesOptions): Promise<
   if (sizeMB > 25) return { error: "Audio file exceeds maximum size limit", code: "FILE_TOO_LARGE", details: `File is ${sizeMB.toFixed(2)}MB, max 25MB` };
 
   const form = new FormData();
-  form.append("file", new Blob([options.audio], { type: options.mimeType }), `audio.${extensionFor(options.mimeType)}`);
+  // Blob wants a concrete ArrayBuffer; a Uint8Array parameter is Uint8Array<ArrayBufferLike>, which fails strict typing.
+  const filePart = options.audio.buffer.slice(options.audio.byteOffset, options.audio.byteOffset + options.audio.byteLength) as ArrayBuffer;
+  form.append("file", new Blob([filePart], { type: options.mimeType }), `audio.${extensionFor(options.mimeType)}`);
   form.append("model", "whisper-1");
   form.append("response_format", "verbose_json");
   if (options.language) form.append("language", options.language);
