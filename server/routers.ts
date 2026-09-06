@@ -58,7 +58,7 @@ export const appRouter = router({
       const mimeType = safeAudioMimeType(input.audioMime);
       const extension = mimeType.split("/")[1] ?? "webm";
       const { key } = await storagePut(`reader-leader/recordings/demo-${Date.now()}.${extension}`, bytes, mimeType);
-      const transcription = await transcribeAudio({ audioUrl: await storageGetSignedUrl(key), language: "en", prompt: "Transcribe an English-speaking child reading aloud. Preserve words as spoken. Do not correct mistakes." });
+      const transcription = await (await import("../whisperTranscription")).transcribeAudio({ audio: bytes, mimeType, language: "en", prompt: transcriptionPrompt });
       if ("error" in transcription) throw new Error(transcription.error);
       return { ...analyseReadingText(input.expectedText, transcription.text, input.durationSeconds), transcriptionStatus: "transcribed" as const };
     }),
