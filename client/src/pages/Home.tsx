@@ -72,6 +72,7 @@ export default function Home() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recognitionRef = useRef<any>(null);
+  const listeningRef = useRef(false);
   const chunksRef = useRef<Blob[]>([]);
   const startedAtRef = useRef(0);
   const wasPausedRef = useRef(0);
@@ -142,7 +143,7 @@ export default function Home() {
     if (!correct && assessmentMode === "GUIDED_PRACTICE" && nextAttempts >= 2) { if (readingState === "listening") pauseOrResume(); playSpeech(target.text); setCoachMoment("prompt"); toast("The Reading Coach played a model after two tries. Listen, then have another go."); }
     else if (correct && target.status === "incorrect") setCoachMoment("self-correction");
   }
-  function cleanupRecording() { recognitionRef.current?.stop?.(); recognitionRef.current = null; streamRef.current?.getTracks().forEach(track => track.stop()); streamRef.current = null; recorderRef.current = null; }
+  function cleanupRecording() { listeningRef.current = false; recognitionRef.current?.stop?.(); recognitionRef.current = null; streamRef.current?.getTracks().forEach(track => track.stop()); streamRef.current = null; recorderRef.current = null; }
   function finishWithGuidedTranscript() { const elapsed = startedAtRef.current > 0 ? Math.max(50, Math.round((Date.now() - startedAtRef.current - pausedDurationRef.current) / 1000)) : 70; finishWithReport(createGuidedReport(selectedStory, liveTranscript.trim() || fallbackTranscripts[selectedStory.id] || selectedStory.text, elapsed, assessmentMode, wordStates)); }
   async function sendRecording(blob: Blob) {
     const elapsed = Math.max(20, Math.round((Date.now() - startedAtRef.current - pausedDurationRef.current) / 1000));
@@ -152,9 +153,13 @@ export default function Home() {
   function beginRecognition() {
     const Recognition = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
     if (!Recognition) return;
+    listeningRef.current = true;
     const recognition = new Recognition(); recognition.lang = "en-IE"; recognition.continuous = true; recognition.interimResults = true;
     recognition.onresult = (event: any) => { let fullText = ""; for (let index = 0; index < event.results.length; index += 1) fullText += `${event.results[index][0].transcript} `; setLiveTranscript(fullText.trim()); };
-    recognition.onerror = () => undefined; recognition.start(); recognitionRef.current = recognition;
+    recognition.onend = () => { if (listeningRef.current && recognitionRef.current === recognition) { try { recognition.start(); } catch {} } };
+    recognition.onerror = (event: any) => { if (event.error === "not-allowed" || event.error === "service-not-allowed") listeningRef.current = false; };
+    recognitionRef.current = recognition;
+    recognition.start();
   }
   async function startReading() {
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { startedAtRef.current = Date.now(); setReadingState("listening"); return toast("Recording is not available in this browser. You can still complete the guided reading session."); }
@@ -166,10 +171,10 @@ export default function Home() {
       recorder.start(250); beginRecognition(); setReadingState("listening");
     } catch { startedAtRef.current = Date.now(); setReadingState("listening"); toast("Microphone access was not granted. Guided practice remains available."); }
   }
-  function pauseOrResume() { const recorder = recorderRef.current; if (readingState === "listening") { recorder?.pause(); recognitionRef.current?.stop?.(); wasPausedRef.current = Date.now(); return setReadingState("paused"); } if (readingState === "paused") { recorder?.resume(); pausedDurationRef.current += Date.now() - wasPausedRef.current; beginRecognition(); setReadingState("listening"); } }
-  function restartReading() { shouldCompleteRef.current = false; if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop(); else cleanupRecording(); setLiveTranscript(""); setCoachMoment("idle"); setReadingState("ready"); toast("Fresh start. Take your time and enjoy the story."); }
-  function completeReading() { if (readingState === "processing") return; const recorder = recorderRef.current; if (recorder?.state === "recording") { shouldCompleteRef.current = true; recorder.stop(); return; } if (recorder?.state === "paused") { recorder.stop(); cleanupRecording(); } if (!startedAtRef.current) startedAtRef.current = Date.now() - 70_000; setReadingState("processing"); window.setTimeout(finishWithGuidedTranscript, 160); }
-  function completeGuidedSession() { shouldCompleteRef.current = false; if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop(); cleanupRecording(); if (!startedAtRef.current) startedAtRef.current = Date.now() - 70_000; finishWithGuidedTranscript(); }
+  function pauseOrResume() { const recorder = recorderRef.current; if (readingState === "listening") { recorder?.pause(); listeningRef.current = false; recognitionRef.current?.stop?.(); wasPausedRef.current = Date.now(); return setReadingState("paused"); } if (readingState === "paused") { recorder?.resume(); pausedDurationRef.current += Date.now() - wasPausedRef.current; beginRecognition(); setReadingState("listening"); } }
+  function restartReading() { shouldCompleteRef.current = false; listeningRef.current = false; if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop(); else cleanupRecording(); setLiveTranscript(""); setCoachMoment("idle"); setReadingState("ready"); toast("Fresh start. Take your time and enjoy the story."); }
+  function completeReading() { if (readingState === "processing") return; const recorder = recorderRef.current; if (recorder?.state === "recording") { shouldCompleteRef.current = true; listeningRef.current = false; recorder.stop(); return; } if (recorder?.state === "paused") { listeningRef.current = false; recorder.stop(); cleanupRecording(); } if (!startedAtRef.current) startedAtRef.current = Date.now() - 70_000; setReadingState("processing"); window.setTimeout(finishWithGuidedTranscript, 160); }
+  function completeGuidedSession() { shouldCompleteRef.current = false; listeningRef.current = false; if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop(); cleanupRecording(); if (!startedAtRef.current) startedAtRef.current = Date.now() - 70_000; finishWithGuidedTranscript(); }
   function chooseView(next: View) { if (next === "teacher" && !isTeacherAccount) return toast("Sign in with a teacher account to open the Teacher Dashboard."); if (next === "parent" && !isParentAccount) return toast("Sign in with a parent account to open the Parent Dashboard."); if (next === "reading" && !childProfile) return toast("Set up a child profile before starting a Reading Session."); setView(next); }
 
   if (loading) return <div className="auth-screen"><div className="auth-loading">Opening your reading space…</div></div>;
