@@ -71,6 +71,13 @@
       "when": 1788564216045,
       "tag": "0009_strange_solo",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1788703971989,
+      "tag": "0010_illegal_wrecking_crew",
+      "breakpoints": true
     }
   ]
 }

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { childProfiles, classEnrollments, familyLinks, homePracticeChecklists, learnerReadingSettings, parentReminders, readerClasses, teacherTermPresets, users } from "../drizzle/schema";
+import { childProfiles, classEnrollments, familyLinks, homePracticeChecklists, learnerReadingSettings, materialAssignments, parentReminders, readerClasses, teacherTermPresets, users } from "../drizzle/schema";
 import { getDb } from "./db";
-import { addLearnerToTeacherClass, addLearnersToTeacherClass, createAdditionalClassForTeacher, deleteTeacherTermPreset, getLearnerReadingSettings, getTeacherDashboard, listParentReminders, listTeacherTermPresets, markAllParentRemindersRead, markParentReminderRead, saveHomePracticeChecklist, saveLearnerReadingSettings, saveTeacherTermPreset } from "./readerDb";
+import { addLearnerToTeacherClass, addLearnersToTeacherClass, approveReadingMaterial, assignReadingMaterialToClasses, createAdditionalClassForTeacher, createReadingMaterial, deleteTeacherTermPreset, getLearnerReadingSettings, getTeacherDashboard, listParentReminders, listTeacherTermPresets, makeReadingMaterialAssignable, markAllParentRemindersRead, markParentReminderRead, saveHomePracticeChecklist, saveLearnerReadingSettings, saveTeacherTermPreset } from "./readerDb";
 
 const databaseAvailable = Boolean(process.env.DATABASE_URL);
 const testKey = `rlt-${crypto.randomUUID()}`;
@@ -76,6 +76,26 @@ describe.skipIf(!databaseAvailable)("Reader Leader persisted class and reminder 
     expect(result.created.map(item => item.displayName)).toEqual(["Alex Turner", "Robin Shah"]);
     expect(result.errors).toEqual([{ row: 3, message: "This learner name appears more than once in the import." }, { row: 4, message: "This learner is already in the selected class roster." }]);
     expect((await getTeacherDashboard(teacher.id)).classes.find(item => item.id === readerClass.id)?.pupilCount).toBe(3);
+  });
+
+  it("persists material metadata and assigns an approved text only to selected teacher classes", async () => {
+    const teacher = await insertUser(`${testKey}-material-teacher`, "Material Teacher", "teacher");
+    const firstClass = await createAdditionalClassForTeacher(teacher.id, "Selected Owls", `T${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`);
+    const secondClass = await createAdditionalClassForTeacher(teacher.id, "Other Owls", `T${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`);
+    createdClassIds.push(firstClass.id, secondClass.id);
+    const created = await createReadingMaterial({ teacherUserId: teacher.id, title: "The Careful Fox", author: "Material Teacher", rightsSource: "original", interestAge: "8–10", genre: "Adventure", readingLevel: "Level 3 · Sky Blue", sourceText: "A careful fox followed a winding woodland path and helped a small bird carry twigs safely home before the evening rain arrived." });
+
+    expect(created.details).toMatchObject({ author: "Material Teacher", rightsSource: "original", interestAge: "8–10", genre: "Adventure", lifecycleStatus: "draft" });
+    await expect(assignReadingMaterialToClasses(teacher.id, created.id, [firstClass.id])).rejects.toThrow("Make this reading material assignable");
+    expect((await approveReadingMaterial(teacher.id, created.id)).lifecycleStatus).toBe("teacher_approved");
+    expect((await makeReadingMaterialAssignable(teacher.id, created.id)).lifecycleStatus).toBe("assignable");
+    const result = await assignReadingMaterialToClasses(teacher.id, created.id, [firstClass.id]);
+    expect(result.assignedClasses.map(item => item.id)).toEqual([firstClass.id]);
+
+    const db = await getDb();
+    if (!db) throw new Error("Database is unavailable for integration coverage.");
+    const assignments = await db.select().from(materialAssignments).where(eq(materialAssignments.materialId, created.id));
+    expect(assignments.map(item => item.classId)).toEqual([firstClass.id]);
   });
 
   it("saves, lists, and removes a teacher-owned named term preset", async () => {

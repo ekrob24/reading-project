@@ -6,6 +6,10 @@ export const assessmentModeValues = ["GUIDED_PRACTICE", "ASSISTED_PRACTICE", "MO
 export type AssessmentMode = (typeof assessmentModeValues)[number];
 export const readingLanguageSupportValues = ["STANDARD_ENGLISH", "IRISH_ENGLISH_SUPPORT"] as const;
 export type ReadingLanguageSupport = (typeof readingLanguageSupportValues)[number];
+export const materialRightsSourceValues = ["original", "public_domain", "permission_obtained"] as const;
+export type MaterialRightsSource = (typeof materialRightsSourceValues)[number];
+export const materialLifecycleValues = ["draft", "teacher_approved", "assignable"] as const;
+export type MaterialLifecycle = (typeof materialLifecycleValues)[number];
 
 /** Core identity managed by Manus OAuth. Roles are assigned through the Reader Leader onboarding flow. */
 export const users = mysqlTable("users", {
@@ -119,6 +123,22 @@ export const readingMaterials = mysqlTable("readingMaterials", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+/** Breadth-layer metadata and approval state for teacher-contributed texts. */
+export const readingMaterialDetails = mysqlTable("readingMaterialDetails", {
+  id: int("id").autoincrement().primaryKey(),
+  materialId: int("materialId").notNull().unique().references(() => readingMaterials.id, { onDelete: "cascade" }),
+  author: varchar("author", { length: 180 }).notNull(),
+  rightsSource: mysqlEnum("rightsSource", materialRightsSourceValues).notNull(),
+  interestAge: varchar("interestAge", { length: 80 }).notNull(),
+  genre: varchar("genre", { length: 80 }).notNull(),
+  lifecycleStatus: mysqlEnum("lifecycleStatus", materialLifecycleValues).default("draft").notNull(),
+  approvedByUserId: int("approvedByUserId").references(() => users.id, { onDelete: "set null" }),
+  approvedAt: timestamp("approvedAt"),
+  assignableAt: timestamp("assignableAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export type ExerciseQuestion = { prompt: string; options: string[]; answer: string; explanation: string };
 export type ExerciseSet = { vocabulary: { word: string; childFriendlyMeaning: string }[]; questions: ExerciseQuestion[]; activity: string };
 
@@ -185,4 +205,5 @@ export const quizAttempts = mysqlTable("quizAttempts", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type ReadingMaterial = typeof readingMaterials.$inferSelect;
+export type ReadingMaterialDetails = typeof readingMaterialDetails.$inferSelect;
 export type ReadingSession = typeof readingSessions.$inferSelect;

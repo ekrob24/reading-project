@@ -9,7 +9,8 @@ import { createReadingReport } from "../readerReports";
 import { scoreQuiz } from "../quizPolicy";
 import { createBrandedPdfReport } from "../pdfReports";
 import {
-  approveExercises,
+  approveReadingMaterial,
+  assignReadingMaterialToClasses,
   addLearnerToTeacherClass,
   addLearnersToTeacherClass,
   createAdditionalClassForTeacher,
@@ -28,10 +29,12 @@ import {
   getTeacherDashboard,
   getTeacherMonthlyTrendExport,
   listParentReminders,
+  listTeacherClasses,
   listTeacherTermPresets,
   isTeacher,
   linkParentToFamily,
   listAssignedMaterialsForChild,
+  makeReadingMaterialAssignable,
   listTeacherMaterials,
   mayAccessChildProfile,
   saveGeneratedExercises,
@@ -61,6 +64,7 @@ const teacherRole = z.literal("teacher");
 const parentRole = z.literal("parent");
 const assessmentModeSchema = z.enum(["GUIDED_PRACTICE", "ASSISTED_PRACTICE", "MONTHLY_ASSESSMENT"]);
 const languageSupportSchema = z.enum(["STANDARD_ENGLISH", "IRISH_ENGLISH_SUPPORT"]);
+const materialRightsSourceSchema = z.enum(["original", "public_domain", "permission_obtained"]);
 const trendDateRangeSchema = z.object({ startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional();
 const termPresetSchema = z.object({ name: z.string().trim().min(2).max(80), startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) });
 const wordStateSchema = z.object({ id: z.string().regex(/^word-\d+$/), text: z.string().min(1).max(80), status: z.enum(["unread", "current", "correct", "incorrect", "retried_correct"]), attempts: z.number().int().min(0).max(12) });
@@ -140,12 +144,16 @@ export const readerLeaderRouter = router({
     }),
     review: protectedProcedure.input(z.object({ materialId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      const review = await getTeacherMaterialReview(ctx.user.id, input.materialId);
+      const [review, classes] = await Promise.all([getTeacherMaterialReview(ctx.user.id, input.materialId), listTeacherClasses(ctx.user.id)]);
       if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "This material is not available to your class." });
-      return review;
+      return { ...review, availableClasses: classes.map(readerClass => ({ id: readerClass.id, name: readerClass.name, joinCode: readerClass.joinCode })) };
     }),
     create: protectedProcedure.input(z.object({
       title: z.string().trim().min(3).max(180),
+      author: z.string().trim().min(2).max(180),
+      rightsSource: materialRightsSourceSchema,
+      interestAge: z.string().trim().min(2).max(80),
+      genre: z.string().trim().min(2).max(80),
       readingLevel: z.string().trim().min(2).max(80),
       sourceText: z.string().trim().min(80).max(8000),
       sourceFilename: z.string().trim().min(1).max(255).optional(),
@@ -162,7 +170,7 @@ export const readerLeaderRouter = router({
         const stored = await storagePut(`reader-leader/materials/${ctx.user.id}/${safeFilename(input.sourceFilename)}`, bytes, input.sourceFileMime || "text/plain");
         storageKey = stored.key;
       }
-      return createReadingMaterial({ teacherUserId: ctx.user.id, title: input.title, readingLevel: input.readingLevel, sourceText: input.sourceText, sourceFilename: input.sourceFilename, storageKey });
+      return createReadingMaterial({ teacherUserId: ctx.user.id, title: input.title, author: input.author, rightsSource: input.rightsSource, interestAge: input.interestAge, genre: input.genre, readingLevel: input.readingLevel, sourceText: input.sourceText, sourceFilename: input.sourceFilename, storageKey });
     }),
     generateExercises: protectedProcedure.input(z.object({ materialId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
@@ -182,9 +190,15 @@ export const readerLeaderRouter = router({
     }),
     approve: protectedProcedure.input(z.object({ materialId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      await approveExercises(ctx.user.id, input.materialId);
-      const dashboard = await getTeacherDashboard(ctx.user.id);
-      return { success: true, assignedClasses: dashboard.classes.map(readerClass => ({ id: readerClass.id, name: readerClass.name, joinCode: readerClass.joinCode })) };
+      return { success: true, details: await approveReadingMaterial(ctx.user.id, input.materialId) };
+    }),
+    makeAssignable: protectedProcedure.input(z.object({ materialId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      requireTeacher(ctx.user.role);
+      return { success: true, details: await makeReadingMaterialAssignable(ctx.user.id, input.materialId) };
+    }),
+    assign: protectedProcedure.input(z.object({ materialId: z.number().int().positive(), classIds: z.array(z.number().int().positive()).min(1).max(100).refine(classIds => new Set(classIds).size === classIds.length, "Choose each class only once.") })).mutation(async ({ ctx, input }) => {
+      requireTeacher(ctx.user.role);
+      return assignReadingMaterialToClasses(ctx.user.id, input.materialId, input.classIds);
     }),
   }),
   sessions: router({

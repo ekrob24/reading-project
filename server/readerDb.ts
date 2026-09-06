@@ -10,6 +10,7 @@ import {
   parentReminders,
   readerClasses,
   readingExercises,
+  readingMaterialDetails,
   readingMaterials,
   readingSessions,
   quizAttempts,
@@ -17,6 +18,7 @@ import {
   sessionComments,
   teacherTermPresets,
   type ExerciseSet,
+  type MaterialRightsSource,
   type QuizAnswer,
   type StoredIntervention,
   type AssessmentMode,
@@ -208,27 +210,97 @@ export async function mayAccessChildProfile(viewer: AuthenticatedReader, childPr
   return false;
 }
 
-export async function createReadingMaterial(input: { teacherUserId: number; title: string; readingLevel: string; sourceText: string; sourceFilename?: string; storageKey?: string }) {
+export async function createReadingMaterial(input: { teacherUserId: number; title: string; readingLevel: string; sourceText: string; author: string; rightsSource: MaterialRightsSource; interestAge: string; genre: string; sourceFilename?: string; storageKey?: string }) {
   const db = await requireDb();
-  await db.insert(readingMaterials).values(input);
-  const [material] = await db.select().from(readingMaterials).where(and(eq(readingMaterials.teacherUserId, input.teacherUserId), eq(readingMaterials.title, input.title))).orderBy(desc(readingMaterials.id)).limit(1);
-  if (!material) throw new Error("Could not save reading material.");
-  return material;
+  const { author, rightsSource, interestAge, genre, ...materialInput } = input;
+  return db.transaction(async transaction => {
+    await transaction.insert(readingMaterials).values(materialInput);
+    const [material] = await transaction.select().from(readingMaterials).where(and(eq(readingMaterials.teacherUserId, input.teacherUserId), eq(readingMaterials.title, input.title))).orderBy(desc(readingMaterials.id)).limit(1);
+    if (!material) throw new Error("Could not save reading material.");
+    await transaction.insert(readingMaterialDetails).values({ materialId: material.id, author, rightsSource, interestAge, genre });
+    const [details] = await transaction.select().from(readingMaterialDetails).where(eq(readingMaterialDetails.materialId, material.id)).limit(1);
+    if (!details) throw new Error("Could not save reading material details.");
+    return { ...material, details };
+  });
 }
 
 export async function listTeacherMaterials(teacherUserId: number) {
   const db = await requireDb();
-  return db.select().from(readingMaterials).where(eq(readingMaterials.teacherUserId, teacherUserId)).orderBy(desc(readingMaterials.createdAt));
+  const materials = await db.select().from(readingMaterials).where(eq(readingMaterials.teacherUserId, teacherUserId)).orderBy(desc(readingMaterials.createdAt));
+  if (!materials.length) return [];
+  const details = await db.select().from(readingMaterialDetails).where(inArray(readingMaterialDetails.materialId, materials.map(material => material.id)));
+  return materials.map(material => ({ ...material, details: details.find(item => item.materialId === material.id) ?? null }));
 }
 
 export async function getTeacherMaterialReview(teacherUserId: number, materialId: number) {
   const db = await requireDb();
-  const [row] = await db.select({ material: readingMaterials, exercise: readingExercises })
+  const [row] = await db.select({ material: readingMaterials, exercise: readingExercises, details: readingMaterialDetails })
     .from(readingMaterials)
     .leftJoin(readingExercises, eq(readingMaterials.id, readingExercises.materialId))
+    .leftJoin(readingMaterialDetails, eq(readingMaterials.id, readingMaterialDetails.materialId))
     .where(and(eq(readingMaterials.id, materialId), eq(readingMaterials.teacherUserId, teacherUserId)))
     .limit(1);
-  return row;
+  if (!row) return undefined;
+  const assignments = await db.select({ classId: materialAssignments.classId }).from(materialAssignments).where(eq(materialAssignments.materialId, materialId));
+  return { ...row, assignedClassIds: assignments.map(item => item.classId) };
+}
+
+export async function listTeacherClasses(teacherUserId: number) {
+  const db = await requireDb();
+  return db.select().from(readerClasses).where(eq(readerClasses.teacherUserId, teacherUserId)).orderBy(readerClasses.name);
+}
+
+export async function approveReadingMaterial(teacherUserId: number, materialId: number) {
+  const db = await requireDb();
+  const [row] = await db.select({ material: readingMaterials, details: readingMaterialDetails })
+    .from(readingMaterials)
+    .innerJoin(readingMaterialDetails, eq(readingMaterials.id, readingMaterialDetails.materialId))
+    .where(and(eq(readingMaterials.id, materialId), eq(readingMaterials.teacherUserId, teacherUserId)))
+    .limit(1);
+  if (!row) throw new Error("This reading material is not available to your account or is missing required metadata.");
+  if (row.details.lifecycleStatus === "assignable") return row.details;
+  const approvedAt = row.details.approvedAt ?? new Date();
+  await db.update(readingMaterialDetails).set({ lifecycleStatus: "teacher_approved", approvedByUserId: teacherUserId, approvedAt, assignableAt: null }).where(eq(readingMaterialDetails.materialId, materialId));
+  const [details] = await db.select().from(readingMaterialDetails).where(eq(readingMaterialDetails.materialId, materialId)).limit(1);
+  if (!details) throw new Error("Could not approve this reading material.");
+  return details;
+}
+
+export async function makeReadingMaterialAssignable(teacherUserId: number, materialId: number) {
+  const db = await requireDb();
+  const [row] = await db.select({ material: readingMaterials, details: readingMaterialDetails })
+    .from(readingMaterials)
+    .innerJoin(readingMaterialDetails, eq(readingMaterials.id, readingMaterialDetails.materialId))
+    .where(and(eq(readingMaterials.id, materialId), eq(readingMaterials.teacherUserId, teacherUserId)))
+    .limit(1);
+  if (!row) throw new Error("This reading material is not available to your account or is missing required metadata.");
+  if (row.details.lifecycleStatus === "draft") throw new Error("Approve this reading material before making it assignable.");
+  if (row.details.lifecycleStatus !== "assignable") {
+    await db.update(readingMaterialDetails).set({ lifecycleStatus: "assignable", assignableAt: new Date() }).where(eq(readingMaterialDetails.materialId, materialId));
+  }
+  await db.update(readingExercises).set({ approvedAt: new Date() }).where(eq(readingExercises.materialId, materialId));
+  const [details] = await db.select().from(readingMaterialDetails).where(eq(readingMaterialDetails.materialId, materialId)).limit(1);
+  if (!details) throw new Error("Could not make this reading material assignable.");
+  return details;
+}
+
+export async function assignReadingMaterialToClasses(teacherUserId: number, materialId: number, classIds: number[]) {
+  const db = await requireDb();
+  const [row] = await db.select({ material: readingMaterials, details: readingMaterialDetails })
+    .from(readingMaterials)
+    .innerJoin(readingMaterialDetails, eq(readingMaterials.id, readingMaterialDetails.materialId))
+    .where(and(eq(readingMaterials.id, materialId), eq(readingMaterials.teacherUserId, teacherUserId)))
+    .limit(1);
+  if (!row) throw new Error("This reading material is not available to your account or is missing required metadata.");
+  if (row.details.lifecycleStatus !== "assignable") throw new Error("Make this reading material assignable before choosing classes.");
+  const classes = await db.select().from(readerClasses).where(and(eq(readerClasses.teacherUserId, teacherUserId), inArray(readerClasses.id, classIds)));
+  if (classes.length !== classIds.length) throw new Error("Choose only classes that belong to your teacher account.");
+  await db.transaction(async transaction => {
+    await transaction.delete(materialAssignments).where(eq(materialAssignments.materialId, materialId));
+    await transaction.insert(materialAssignments).values(classes.map(readerClass => ({ classId: readerClass.id, materialId })));
+    await transaction.update(readingMaterials).set({ status: "assigned" }).where(eq(readingMaterials.id, materialId));
+  });
+  return { materialId, assignedClasses: classes.map(readerClass => ({ id: readerClass.id, name: readerClass.name, joinCode: readerClass.joinCode })) };
 }
 
 export async function listAssignedMaterialsForChild(childUserId: number) {
@@ -254,18 +326,6 @@ export async function saveGeneratedExercises(materialId: number, exerciseSet: Ex
   const [exercise] = await db.select().from(readingExercises).where(eq(readingExercises.materialId, materialId)).limit(1);
   if (!exercise) throw new Error("Could not save generated exercises.");
   return exercise;
-}
-
-export async function approveExercises(teacherUserId: number, materialId: number) {
-  const db = await requireDb();
-  const [material] = await db.select().from(readingMaterials).where(and(eq(readingMaterials.id, materialId), eq(readingMaterials.teacherUserId, teacherUserId))).limit(1);
-  if (!material) throw new Error("This reading material is not available to your class.");
-  await db.update(readingExercises).set({ approvedAt: new Date() }).where(eq(readingExercises.materialId, materialId));
-  await db.update(readingMaterials).set({ status: "assigned" }).where(eq(readingMaterials.id, materialId));
-  const classes = await db.select().from(readerClasses).where(eq(readerClasses.teacherUserId, teacherUserId));
-  if (classes.length) {
-    await db.insert(materialAssignments).values(classes.map(readerClass => ({ classId: readerClass.id, materialId }))).onDuplicateKeyUpdate({ set: { materialId } });
-  }
 }
 
 export async function saveReadingSession(input: {
