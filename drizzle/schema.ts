@@ -158,7 +158,7 @@ export const materialAssignments = mysqlTable("materialAssignments", {
   assignedAt: timestamp("assignedAt").defaultNow().notNull(),
 }, table => [unique("assigned_material_class_unique").on(table.classId, table.materialId)]);
 
-export type StoredIntervention = { word: string; action: "prompt" | "model" | "stay_silent" | "teacher_review"; note: string };
+export type StoredIntervention = { word: string; action: "prompt" | "model" | "stay_silent" | "teacher_review"; note: string; eventType?: "correct" | "dialect_variation" | "substitution" | "omission" | "insertion" | "repetition"; heardWord?: string; provisionalIrishEnglish?: boolean; teacherDecision?: string };
 export type StoredWordState = { id: string; text: string; status: "unread" | "current" | "correct" | "incorrect" | "retried_correct"; attempts: number };
 export type StoredWordTiming = { id: string; text: string; startMs: number; endMs: number };
 
