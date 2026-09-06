@@ -669,10 +669,13 @@ export async function provisionLocalDemoCohort() {
     { childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · July", transcript: "Amina followed the path through the quiet garden.", accuracy: 87, wordsCorrectPerMinute: 96, durationSeconds: 91, completed: 1, assessmentMode: "MONTHLY_ASSESSMENT", practiceWords: ["quiet"], interventions: [], wordStates: [], wordTimings: [], createdAt: new Date("2026-07-03T10:00:00Z") },
     { childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · August", transcript: "Amina followed the bright garden path with confidence.", accuracy: 92, wordsCorrectPerMinute: 104, durationSeconds: 85, completed: 1, assessmentMode: "MONTHLY_ASSESSMENT", practiceWords: ["confidence"], interventions: [], wordStates: [], wordTimings: [], createdAt: new Date("2026-08-03T10:00:00Z") },
   ]);
-  const [playbackFixture] = await db.select({ id: readingSessions.id }).from(readingSessions).where(and(eq(readingSessions.childProfileId, profile.id), eq(readingSessions.storyTitle, "Word-linked playback technical check"))).limit(1);
-  if (!playbackFixture) {
-    const audio = await storagePut("demo-playback/word-timing-check.wav", createDemoPlaybackTone(), "audio/wav");
-    await db.insert(readingSessions).values({ childProfileId: profile.id, materialId: material.id, storyTitle: "Word-linked playback technical check", transcript: "Amina reads steadily", accuracy: 100, wordsCorrectPerMinute: 100, durationSeconds: 3, audioStorageKey: audio.key, completed: 1, assessmentMode: "ASSISTED_PRACTICE", practiceWords: [], interventions: [], wordStates: [], wordTimings: [{ id: "spoken-0", text: "Amina", startMs: 0, endMs: 1000 }, { id: "spoken-1", text: "reads", startMs: 1000, endMs: 2000 }, { id: "spoken-2", text: "steadily", startMs: 2000, endMs: 3000 }] });
+  const storageConfigured = Boolean(process.env.BUILT_IN_FORGE_API_URL && process.env.BUILT_IN_FORGE_API_KEY);
+  if (storageConfigured) {
+    const [playbackFixture] = await db.select({ id: readingSessions.id }).from(readingSessions).where(and(eq(readingSessions.childProfileId, profile.id), eq(readingSessions.storyTitle, "Word-linked playback technical check"))).limit(1);
+    if (!playbackFixture) {
+      const audio = await storagePut("demo-playback/word-timing-check.wav", createDemoPlaybackTone(), "audio/wav");
+      await db.insert(readingSessions).values({ childProfileId: profile.id, materialId: material.id, storyTitle: "Word-linked playback technical check", transcript: "Amina reads steadily", accuracy: 100, wordsCorrectPerMinute: 100, durationSeconds: 3, audioStorageKey: audio.key, completed: 1, assessmentMode: "ASSISTED_PRACTICE", practiceWords: [], interventions: [], wordStates: [], wordTimings: [{ id: "spoken-0", text: "Amina", startMs: 0, endMs: 1000 }, { id: "spoken-1", text: "reads", startMs: 1000, endMs: 2000 }, { id: "spoken-2", text: "steadily", startMs: 2000, endMs: 3000 }] });
+    }
   }
   const [existingQuizAttempt] = await db.select({ id: quizAttempts.id }).from(quizAttempts).where(and(eq(quizAttempts.childProfileId, profile.id), eq(quizAttempts.materialId, material.id))).limit(1);
   if (!existingQuizAttempt) await db.insert(quizAttempts).values({ childProfileId: profile.id, materialId: material.id, score: 2, totalQuestions: 3, answers: [{ questionIndex: 0, selectedAnswer: "A lantern", correct: true }, { questionIndex: 1, selectedAnswer: "A rabbit", correct: false }, { questionIndex: 2, selectedAnswer: "She stood still", correct: true }] });
