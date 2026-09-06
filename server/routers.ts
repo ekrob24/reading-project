@@ -10,7 +10,7 @@ import { analyseReadingText } from "./reader";
 import { readerLeaderRouter } from "./routers/readerLeader";
 import { verifyDemoCredentials } from "./demoAuth";
 import { provisionLocalDemoCohort } from "./readerDb";
-import { storageGetSignedUrl, storagePut } from "./storage";
+import { storagePut } from "./storage";
 
 const MAX_AUDIO_BYTES = 4_500_000;
 
