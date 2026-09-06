@@ -226,8 +226,7 @@ export const readerLeaderRouter = router({
       const transcriptionPrompt = learnerSettings.languageSupport === "IRISH_ENGLISH_SUPPORT"
         ? "Transcribe a child reading aloud in Irish English. Preserve the words as spoken, including regional pronunciation. Do not correct mistakes or convert dialect features."
         : "Transcribe an English-speaking child reading aloud. Preserve the words as spoken. Do not correct mistakes.";
-      const transcription = await (await import("../_core/voiceTranscription")).transcribeAudio({ audioUrl: await storageGetSignedUrl(stored.key), language: "en", prompt: transcriptionPrompt });
-      if ("error" in transcription) throw new Error(transcription.error);
+      const transcription = await (await import("../whisperTranscription")).transcribeAudio({ audio: bytes, mimeType, language: "en", prompt: transcriptionPrompt });
       const analysis = analyseReadingText(input.expectedText, transcription.text, input.durationSeconds, input.assessmentMode, input.wordStates, learnerSettings.languageSupport);
       const interventions = analysis.events.filter(event => event.eventType !== "correct").slice(0, 5).map(event => ({ word: event.expectedWord, eventType: event.eventType, heardWord: event.recognisedWord ?? undefined, provisionalIrishEnglish: event.provisionalIrishEnglish, action: event.action === "teacher_review" ? "teacher_review" as const : event.action === "stay_silent" ? "stay_silent" as const : "prompt" as const, note: event.eventType === "dialect_variation" ? "Irish English variation provisionally accepted — please confirm this reading moment from the saved audio." : event.action === "teacher_review" ? "Possible pronunciation variation — flagged for teacher review. The coach stayed silent." : "Try that word again when you are ready." }));
       const wordTimings = buildWordTimings(transcription.text, analysis.durationSeconds, transcription.segments);
