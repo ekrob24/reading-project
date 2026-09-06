@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { sdk } from "./_core/sdk";
 import { systemRouter } from "./_core/systemRouter";
-import { transcribeAudio } from "./_core/voiceTranscription";
+import { transcribeAudio } from "./whisperTranscription";
 import { publicProcedure, router } from "./_core/trpc";
 import { analyseReadingText } from "./reader";
 import { readerLeaderRouter } from "./routers/readerLeader";
@@ -58,7 +58,7 @@ export const appRouter = router({
       const mimeType = safeAudioMimeType(input.audioMime);
       const extension = mimeType.split("/")[1] ?? "webm";
       const { key } = await storagePut(`reader-leader/recordings/demo-${Date.now()}.${extension}`, bytes, mimeType);
-      const transcription = await (await import("../whisperTranscription")).transcribeAudio({ audio: bytes, mimeType, language: "en", prompt: transcriptionPrompt });
+      const transcription = await transcribeAudio({ audio: bytes, mimeType, language: "en", prompt: "..." });
       if ("error" in transcription) throw new Error(transcription.error);
       return { ...analyseReadingText(input.expectedText, transcription.text, input.durationSeconds), transcriptionStatus: "transcribed" as const };
     }),
