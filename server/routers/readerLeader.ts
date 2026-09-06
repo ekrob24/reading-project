@@ -2,6 +2,9 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { invokeLLM } from "../_core/llm";
 import { protectedProcedure, router } from "../_core/trpc";
+import { getDb } from "../db";
+import { readingSessions } from "../../drizzle/schema";
+import { getAccentFairnessSummary } from "../accentMetrics";
 import { analyseReadingText } from "../reader";
 import { assertSafeExerciseSet } from "../exerciseSafety";
 import { extractReadingMaterial } from "../documentExtraction";
@@ -447,6 +450,13 @@ export const readerLeaderRouter = router({
     teacher: protectedProcedure.query(async ({ ctx }) => {
       requireTeacher(ctx.user.role);
       return getTeacherDashboard(ctx.user.id);
+    }),
+    accentFairness: protectedProcedure.query(async ({ ctx }) => {
+      requireTeacher(ctx.user.role);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Reader Leader data is temporarily unavailable." });
+      const sessions = await db.select({ id: readingSessions.id, interventions: readingSessions.interventions }).from(readingSessions);
+      return getAccentFairnessSummary(sessions);
     }),
     parent: protectedProcedure.query(async ({ ctx }) => {
       if (ctx.user.role !== "parent" && ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "This dashboard is available to parent accounts." });
