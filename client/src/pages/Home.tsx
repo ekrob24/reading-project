@@ -4,6 +4,7 @@ import { ReportDownloadButton, SessionAudioButton, SessionTranscriptPlayer } fro
 import { DemoLoginLanding } from "@/components/DemoLoginLanding";
 import { AssessmentTrendChart } from "@/components/AssessmentTrendChart";
 import { AssignmentConfirmationScreen, MaterialReviewScreen } from "@/components/TeacherWorkflow";
+import { TeacherSessionReviewScreen } from "@/components/TeacherSessionReview";
 import { TeacherDashboard } from "@/components/TeacherDashboard";
 import { ParentDashboard } from "@/components/ParentDashboard";
 import { trpc } from "@/lib/trpc";
@@ -56,6 +57,7 @@ export default function Home() {
   const { user, loading, isAuthenticated, logout, refresh } = useAuth();
   const [location, setLocation] = useLocation();
   const [, reviewParams] = useRoute("/teacher/materials/:id/review");
+  const [, sessionReviewParams] = useRoute("/teacher/sessions/:id/review");
   const utils = trpc.useUtils();
   const [view, setView] = useState<View>("library");
   const [selectedStory, setSelectedStory] = useState<Story>(stories[0]);
@@ -174,9 +176,9 @@ export default function Home() {
   if (!isAuthenticated) return <DemoLoginLanding />;
   if (accountQuery.isLoading) return <div className="auth-screen"><div className="auth-loading">Finding your Reader Leader account…</div></div>;
   if (accountRole === "user") return <AccountSetup onDone={async () => { await refresh(); await accountQuery.refetch(); window.location.reload(); }} />;
-  if (reviewParams?.id || location === "/teacher/assignments/confirmation") {
+  if (reviewParams?.id || sessionReviewParams?.id || location === "/teacher/assignments/confirmation") {
     if (!isTeacherAccount) return <div className="auth-screen"><section className="setup-card"><h1>Teacher access required</h1><p>This workflow is available only in the authorised Teacher Dashboard.</p><button className="primary-cta" onClick={() => setLocation("/")}>Return to my reading space</button></section></div>;
-    return <div className="rl-app teacher-workflow-app"><header className="top-bar"><button className="brand" onClick={() => setLocation("/")} aria-label="Reader Leader home"><span className="brand-mark"><span /></span> Reader Leader</button><div className="account-pill"><span><strong>{user?.name || "Teacher"}</strong><small>Teacher Dashboard</small></span><button onClick={() => void logout()} aria-label="Sign out"><LogOut size={16} /></button></div></header>{reviewParams?.id ? <MaterialReviewScreen materialId={Number(reviewParams.id)} /> : <AssignmentConfirmationScreen />}</div>;
+    return <div className="rl-app teacher-workflow-app"><header className="top-bar"><button className="brand" onClick={() => setLocation("/")} aria-label="Reader Leader home"><span className="brand-mark"><span /></span> Reader Leader</button><div className="account-pill"><span><strong>{user?.name || "Teacher"}</strong><small>Teacher Dashboard</small></span><button onClick={() => void logout()} aria-label="Sign out"><LogOut size={16} /></button></div></header>{reviewParams?.id ? <MaterialReviewScreen materialId={Number(reviewParams.id)} /> : sessionReviewParams?.id ? <TeacherSessionReviewScreen sessionId={Number(sessionReviewParams.id)} /> : <AssignmentConfirmationScreen />}</div>;
   }
 
   const displayName = childProfile?.displayName ?? user?.name ?? "Reader";

@@ -364,6 +364,29 @@ export async function getSessionPlayback(sessionId: number) {
   return { session, wordTimings: session.wordTimings ?? [] };
 }
 
+export async function getTeacherSessionReview(sessionId: number) {
+  const db = await requireDb();
+  const [review] = await db.select({ session: readingSessions, childName: childProfiles.displayName, bookBand: childProfiles.bookBand })
+    .from(readingSessions)
+    .innerJoin(childProfiles, eq(readingSessions.childProfileId, childProfiles.id))
+    .where(eq(readingSessions.id, sessionId))
+    .limit(1);
+  return review;
+}
+
+export async function saveTeacherInterventionDecision(sessionId: number, interventionIndex: number, teacherDecision: "confirmed" | "overridden") {
+  const db = await requireDb();
+  const session = await getSessionById(sessionId);
+  if (!session) throw new Error("Reading session not found.");
+  const intervention = session.interventions[interventionIndex];
+  if (!intervention) throw new Error("Reading moment not found.");
+  const interventions = session.interventions.map((item, index) => index === interventionIndex ? { ...item, teacherDecision } : item);
+  await db.update(readingSessions).set({ interventions }).where(eq(readingSessions.id, sessionId));
+  const [updated] = await db.select().from(readingSessions).where(eq(readingSessions.id, sessionId)).limit(1);
+  if (!updated) throw new Error("Could not save the teacher decision.");
+  return updated;
+}
+
 export async function getAssignedMaterialForChild(childUserId: number, materialId: number) {
   const materials = await listAssignedMaterialsForChild(childUserId);
   return materials.find(material => material.id === materialId);

@@ -25,6 +25,7 @@ import {
   getParentDashboard,
   getSessionById,
   getSessionPlayback,
+  getTeacherSessionReview,
   getTeacherMaterialReview,
   getTeacherDashboard,
   getTeacherMonthlyTrendExport,
@@ -52,6 +53,7 @@ import {
   markParentReminderRead,
   markAllParentRemindersRead,
   saveTeacherTermPreset,
+  saveTeacherInterventionDecision,
   deleteTeacherTermPreset,
   setUserRole,
 } from "../readerDb";
@@ -265,6 +267,22 @@ export const readerLeaderRouter = router({
       const wordTimings = buildWordTimings(analysis.transcript, analysis.durationSeconds);
       const session = await saveReadingSession({ childProfileId: input.childProfileId, materialId: input.materialId, storyTitle: input.storyTitle, transcript: analysis.transcript, accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds, assessmentMode: input.assessmentMode, languageSupport: learnerSettings.languageSupport, practiceWords: analysis.practiceWords, interventions: [...input.demoInterventions, ...interventions], wordStates: analysis.wordStates, wordTimings });
       return { session, analysis };
+    }),
+    teacherReview: protectedProcedure.input(z.object({ sessionId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+      requireTeacher(ctx.user.role);
+      const review = await getTeacherSessionReview(input.sessionId);
+      if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "Reading session not found." });
+      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, review.session.childProfileId);
+      if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This child is not assigned to your class." });
+      return review;
+    }),
+    decideIntervention: protectedProcedure.input(z.object({ sessionId: z.number().int().positive(), interventionIndex: z.number().int().min(0).max(100), teacherDecision: z.enum(["confirmed", "overridden"]) })).mutation(async ({ ctx, input }) => {
+      requireTeacher(ctx.user.role);
+      const session = await getSessionById(input.sessionId);
+      if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Reading session not found." });
+      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, session.childProfileId);
+      if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This child is not assigned to your class." });
+      return saveTeacherInterventionDecision(input.sessionId, input.interventionIndex, input.teacherDecision);
     }),
     childProgress: protectedProcedure.input(z.object({ childProfileId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
