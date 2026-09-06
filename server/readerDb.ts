@@ -32,6 +32,7 @@ import { storagePut } from "./storage";
 import { buildMonthlyAssessmentTrend, isValidTrendDateRange, minutesReadThisWeek, type TrendDateRange } from "./learningAnalytics";
 import { createDemoPlaybackTone } from "./demoPlaybackFixture";
 import { isPracticeChecklistComplete, normalisePracticeSteps, practiceChecklistDate } from "./homePractice";
+import { analyseReadingText } from "./reader";
 
 export type AuthenticatedReader = { id: number; role: AccountRole };
 
@@ -612,8 +613,8 @@ export async function provisionLocalDemoCohort() {
   if (!readerClass) throw new Error("Could not prepare the teacher demo class.");
   await db.insert(classEnrollments).values({ classId: readerClass.id, childProfileId: profile.id }).onDuplicateKeyUpdate({ set: { classId: readerClass.id } });
   await db.insert(familyLinks).values({ parentUserId: parent.id, childProfileId: profile.id }).onDuplicateKeyUpdate({ set: { parentUserId: parent.id } });
-  // Seed a welcoming demo plan once, while preserving any setting a teacher has saved afterwards.
-  await db.insert(learnerReadingSettings).values({ childProfileId: profile.id, defaultReadingMode: "ASSISTED_PRACTICE", targetWcpm: 112 }).onDuplicateKeyUpdate({ set: { childProfileId: profile.id } });
+  // Keep the local demo child on Irish English support so live reads use the existing accent handling.
+  await db.insert(learnerReadingSettings).values({ childProfileId: profile.id, defaultReadingMode: "ASSISTED_PRACTICE", targetWcpm: 112, languageSupport: "IRISH_ENGLISH_SUPPORT" }).onDuplicateKeyUpdate({ set: { languageSupport: "IRISH_ENGLISH_SUPPORT" } });
   const [existingMaterial] = await db.select().from(readingMaterials).where(and(eq(readingMaterials.teacherUserId, teacher.id), eq(readingMaterials.title, "The Lantern in the Garden"))).limit(1);
   const material = existingMaterial ?? (await (async () => {
     await db.insert(readingMaterials).values({ teacherUserId: teacher.id, title: "The Lantern in the Garden", readingLevel: "Level 3 · Sky Blue", sourceText: "Amina carried a little lantern into the garden at dusk. The light made golden circles on the path. Near the tall gate, she saw a hedgehog sniffing beside the flowers. Amina stood very still, then watched it hurry safely under the hedge.", status: "assigned" });
@@ -627,6 +628,16 @@ export async function provisionLocalDemoCohort() {
   await db.insert(materialAssignments).values({ classId: readerClass.id, materialId: material.id }).onDuplicateKeyUpdate({ set: { materialId: material.id } });
   const [existingSession] = await db.select({ id: readingSessions.id }).from(readingSessions).where(eq(readingSessions.childProfileId, profile.id)).limit(1);
   if (!existingSession) await db.insert(readingSessions).values({ childProfileId: profile.id, materialId: material.id, storyTitle: "The Lantern in the Garden", transcript: "Amina carried a little lantern into the garden at dusk.", accuracy: 91, wordsCorrectPerMinute: 108, durationSeconds: 72, completed: 1, practiceWords: ["lantern", "hedgehog"], interventions: [{ word: "hedgehog", action: "teacher_review", note: "Possible pronunciation variation — the coach stayed silent for teacher review." }], wordStates: [] });
+  const accentShowcaseTitle = "Accent Showcase — The Thin Path";
+  const [accentShowcaseSeed] = await db.select({ id: readingSessions.id }).from(readingSessions).where(and(eq(readingSessions.childProfileId, profile.id), eq(readingSessions.storyTitle, accentShowcaseTitle))).limit(1);
+  if (!accentShowcaseSeed) {
+    const expectedText = "The thin path was caught";
+    const transcript = "The tin pat was cot";
+    const durationSeconds = 30;
+    const analysis = analyseReadingText(expectedText, transcript, durationSeconds, "ASSISTED_PRACTICE", undefined, "IRISH_ENGLISH_SUPPORT");
+    const interventions = analysis.events.filter(event => event.eventType !== "correct").slice(0, 5).map(event => ({ word: event.expectedWord, eventType: event.eventType, heardWord: event.recognisedWord ?? undefined, provisionalIrishEnglish: event.provisionalIrishEnglish, action: event.action === "teacher_review" ? "teacher_review" as const : event.action === "stay_silent" ? "stay_silent" as const : "prompt" as const, note: event.eventType === "dialect_variation" ? "Irish English variation provisionally accepted — please confirm this reading moment from the saved audio." : event.action === "teacher_review" ? "Possible pronunciation variation — flagged for teacher review. The coach stayed silent." : "Try that word again when you are ready." }));
+    await db.insert(readingSessions).values({ childProfileId: profile.id, storyTitle: accentShowcaseTitle, transcript: analysis.transcript, accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds, completed: 1, assessmentMode: analysis.mode, languageSupport: "IRISH_ENGLISH_SUPPORT", practiceWords: analysis.practiceWords, interventions, wordStates: analysis.wordStates });
+  }
   const [historicalTrendSeed] = await db.select({ id: readingSessions.id }).from(readingSessions).where(and(eq(readingSessions.childProfileId, profile.id), eq(readingSessions.storyTitle, "Garden Walk · June"))).limit(1);
   if (!historicalTrendSeed) await db.insert(readingSessions).values([
     { childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · June", transcript: "Amina followed the path through the garden.", accuracy: 82, wordsCorrectPerMinute: 88, durationSeconds: 95, completed: 1, assessmentMode: "MONTHLY_ASSESSMENT", practiceWords: ["followed"], interventions: [], wordStates: [], wordTimings: [], createdAt: new Date("2026-06-03T10:00:00Z") },
